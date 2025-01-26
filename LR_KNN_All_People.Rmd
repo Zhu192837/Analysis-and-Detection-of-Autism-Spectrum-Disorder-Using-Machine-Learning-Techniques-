@@ -1,0 +1,695 @@
+---
+title: "Untitled"
+author: "Wangshu Zhu"
+date: "2024-12-15"
+output: pdf_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(pROC)
+library(corrplot)
+library(class)
+```
+
+# Autism-all_People-Data Analysis
+
+# 1. Data Preparation
+
+## 1.1. Data Overview
+```{r}
+# load data
+dataset1 <- read.arff("C:/Users/Lenovo/Desktop/autism+screening+adult/Autism-Adolescent-Data.arff")
+dataset2 <- read.arff("C:/Users/Lenovo/Desktop/autism+screening+adult/Autism-Adult-Data.arff")
+dataset3 <- read.arff("C:/Users/Lenovo/Desktop/autism+screening+adult/Autism-Child-Data.arff")
+
+dataset <- rbind(dataset1, dataset2, dataset3)
+```
+
+
+```{r}
+# data structure
+print(str(dataset))    
+```
+
+```{r}
+# column rename
+colnames(dataset) <- c("A1_Score", "A2_Score", "A3_Score", "A4_Score", "A5_Score",
+                       "A6_Score", "A7_Score", "A8_Score", "A9_Score", "A10_Score",
+                       "Age", "Gender", "Ethnicity", "Jaundice", "Family_ASD",
+                       "Country", "Used_App_Before", "Result", "Age_Desc", "Relation", "Class_ASD")
+
+```
+
+```{r}
+# Summary Statistics
+print(summary(dataset)) 
+# Null value test
+print(colSums(is.na(dataset)))
+```
+## 1.2. Data Exploratory analysis
+
+### 1.2.1. Age Exploratory analysis
+```{r}
+
+dataset <- dataset %>% filter(Age <= 100)
+
+boxplot(dataset$Age, main = "Boxplot of Age", col = "lightblue")
+
+ggplot(dataset, aes(x = Age, fill = Class_ASD)) +
+  geom_histogram(position = "dodge", bins = 20, alpha = 0.7) +
+  ggtitle("Age Distribution by Class_ASD") +
+  xlab("Age") +
+  ylab("Count") +
+  theme_minimal()
+
+
+ggplot(dataset, aes(x = Age, fill = Class_ASD)) +
+  geom_density(alpha = 0.5) +
+  ggtitle("Age Density by Class_ASD") +
+  xlab("Age") +
+  ylab("Density") +
+  theme_minimal()
+
+
+ggplot(dataset, aes(x = Class_ASD, y = Age, fill = Class_ASD)) +
+  geom_boxplot() +
+  ggtitle("Age vs Class_ASD")
+
+
+```
+
+### 1.2.2. Redundant term verification
+```{r}
+lm_model <- lm(Result ~ A1_Score + A2_Score + A3_Score + A4_Score + A5_Score + 
+               A6_Score + A7_Score + A8_Score + A9_Score + A10_Score, data = dataset)
+
+summary(lm_model)
+
+```
+
+### 1.2.3. Relationship analysis between categorical variables and target variables
+```{r}
+
+# Jundice & Class_ASD
+ggplot(dataset, aes(x = Jaundice, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Jundice Distribution by Class_ASD") +
+  ylab("Proportion") + xlab("Jundice")
+
+# Family_ASD & Class_ASD
+ggplot(dataset, aes(x = Family_ASD, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Family_ASD Distribution by Class_ASD") +
+  ylab("Proportion") + xlab("Autism")
+
+# Used_App_Before & Class_ASD
+ggplot(dataset, aes(x = Used_App_Before, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Used_App_Before Distribution by Used_App_Before") +
+  ylab("Proportion") + xlab("Autism")
+```
+
+### 1.2.4. Relationship between Ethnicity distribution and target variable
+```{r}
+# Ethnicity distribution statistics
+Ethnicity_count <- dataset %>%
+  group_by(Ethnicity) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count))
+
+# Visualize All Ethnicity by Observation Count
+ggplot(Ethnicity_count, aes(x = reorder(Ethnicity, -Count), y = Count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  ggtitle("All Ethnicity by Observation Count") +
+  xlab("Country") + ylab("Count") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Visualize Autism Distribution by Ethnicity
+ggplot(dataset, aes(x = Ethnicity, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Autism Distribution by Ethnicity") +
+  ylab("Proportion") + xlab("Autism")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Visualize target variable proportion in the Ethnicity distribution
+ethnicity_summary <- dataset %>%
+  group_by(Ethnicity, Class_ASD) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(Ethnicity) %>%
+  mutate(Proportion = Count / sum(Count) * 100) %>%  
+  ungroup()
+
+ethnicity_order <- ethnicity_summary %>%
+  group_by(Ethnicity) %>%
+  summarise(Total_Count = sum(Count)) %>%
+  arrange(desc(Total_Count))
+
+ggplot(ethnicity_summary, 
+       aes(x = factor(Ethnicity, levels = ethnicity_order$Ethnicity), 
+           y = Count, fill = Class_ASD)) +
+  geom_bar(stat = "identity", position = "stack", alpha = 0.8) +  
+  geom_text(data = ethnicity_summary %>% filter(Class_ASD == "YES"), 
+            aes(label = sprintf("%.2f%%", Proportion)), 
+            position = position_stack(vjust = 0.5), size = 3, color = "black") +
+  ggtitle("Ethnicity Count with Class_ASD Proportion") +
+  xlab("Ethnicity") + 
+  ylab("Count") +
+  scale_fill_manual(values = c("NO" = "salmon", "YES" = "skyblue")) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+### 1.2.5. Relationship between Country distribution and target variable
+```{r}
+# Country distribution statistics
+country_count <- dataset %>%
+  group_by(Country) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count))
+
+
+# Visualize All Countries by Observation Count
+ggplot(country_count, aes(x = reorder(Country, -Count), y = Count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  ggtitle("All Countries by Observation Count") +
+  xlab("Country") + ylab("Count") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Visualize Autism Distribution by Ethnicity
+ggplot(dataset, aes(x = Country, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Autism Distribution by Ethnicity") +
+  ylab("Proportion") + xlab("Autism") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Visualize Country Count with Class_ASD Proportion
+Country_summary <- dataset %>%
+  group_by(Country, Class_ASD) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(Country) %>%
+  mutate(Proportion = Count / sum(Count) * 100) %>%
+  ungroup()
+
+Country_order <- Country_summary %>%
+  group_by(Country) %>%
+  summarise(Total_Count = sum(Count)) %>%
+  arrange(desc(Total_Count))
+
+ggplot(Country_summary, 
+       aes(x = factor(Country, levels = Country_order$Country), 
+           y = Count, fill = Class_ASD)) +
+  geom_bar(stat = "identity", position = "stack", alpha = 1) + 
+  ggtitle("Country Count with Class_ASD Proportion") +
+  xlab("Country") + 
+  ylab("Count") +
+  scale_fill_manual(values = c("NO" = "salmon", "YES" = "skyblue")) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+### 1.2.6. Relationship between factor and target variable
+```{r}
+data = dataset
+data$A1_Score <- as.numeric(as.character(dataset$A1_Score))
+data$A2_Score <- as.numeric(as.character(dataset$A2_Score))
+data$A3_Score <- as.numeric(as.character(dataset$A3_Score))
+data$A4_Score <- as.numeric(as.character(dataset$A4_Score))
+data$A5_Score <- as.numeric(as.character(dataset$A5_Score))
+data$A6_Score <- as.numeric(as.character(dataset$A6_Score))
+data$A7_Score <- as.numeric(as.character(dataset$A7_Score))
+data$A8_Score <- as.numeric(as.character(dataset$A8_Score))
+data$A9_Score <- as.numeric(as.character(dataset$A9_Score))
+data$A10_Score <- as.numeric(as.character(dataset$A10_Score))
+data$Class_ASD <- ifelse(dataset$Class_ASD == "YES", 1,
+                         ifelse(dataset$Class_ASD == "NO", 0, NA))
+
+score_data <- data[, c("A1_Score", "A2_Score", "A3_Score", "A4_Score", 
+                       "A5_Score", "A6_Score", "A7_Score", "A8_Score", 
+                       "A9_Score", "A10_Score","Class_ASD")]
+
+cor_matrix <- cor(score_data)
+
+corrplot(cor_matrix, method = "color", type = "full", 
+         tl.col = "black", tl.srt = 45, 
+         addCoef.col = "black", number.cex = 0.7, 
+         title = "Heatmap of Score Correlations")
+
+str(data)
+```
+
+### 1.2.7. Check for collinearity
+```{r}
+library(car)
+cor_data <- data[, c("A1_Score", "A2_Score", "A3_Score", "A4_Score", "A5_Score", 
+                     "A6_Score", "A7_Score", "A8_Score", "A9_Score", "A10_Score", 
+                     "Age", "Gender", "Jaundice", "Family_ASD", "Used_App_Before","Class_ASD")]
+
+model <- lm(Class_ASD ~ ., data = cor_data)
+
+vif_values <- vif(model)
+print(vif_values)
+
+```
+
+## 1.3. Data preprocessing
+
+### 1.3.1. Process Binary Columns
+```{r}
+# Determine the binary columns that need to be processed
+binary_columns <- c("Jaundice", "Family_ASD", "Used_App_Before", "Class_ASD")
+
+# Unify the values of all binary columns into lowercase and convert them to 0/1
+dataset[binary_columns] <- lapply(dataset[binary_columns], function(x) {
+  x <- tolower(as.character(x))       
+  x <- ifelse(x == "yes", 1, ifelse(x == "no", 0, NA))  
+  as.numeric(x)                 
+})
+```
+### 1.3.2. Process Null Value Columns
+```{r}
+# Process the gender column: convert "m" and "f" to numeric values
+dataset$Gender <- ifelse(dataset$Gender == "m", 1, ifelse(dataset$Gender == "f", 0, NA))
+
+# Use median to fill numeric variables Age 
+# data <- na.omit(data) # remove Na Data
+dataset$Age[is.na(dataset$Age)] <- median(dataset$Age, na.rm = TRUE)
+
+# Use mode to fill ategorical variables Ethnicity Relation
+fill_mode <- function(x) {
+  ux <- unique(x[!is.na(x)])
+  ux[which.max(tabulate(match(x, ux)))]
+}
+dataset$Ethnicity[is.na(dataset$Ethnicity)] <- fill_mode(dataset$Ethnicity)
+dataset$Relation[is.na(dataset$Relation)] <- fill_mode(dataset$Relation)
+
+str(dataset)
+```
+
+## 1.4. Data Preparation
+
+### 1.4.1. Extract Feature & Target
+```{r}
+features <- c("A1_Score", "A2_Score", "A3_Score", "A4_Score", "A5_Score",
+              "A6_Score", "A7_Score", "A8_Score", "A9_Score", "A10_Score",
+              "Age", "Gender", "Jaundice", "Family_ASD", "Used_App_Before")
+
+X <- dataset[, features]
+y <- dataset$Class_ASD
+```
+
+### 1.4.2. Dataset Partitioning
+```{r}
+
+set.seed(123) 
+train_index <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[train_index, ]
+X_test <- X[-train_index, ]
+y_train <- y[train_index]
+y_test <- y[-train_index]
+
+print("Training set dimensions:")
+print(dim(X_train))
+
+print("Testing set dimensions")
+print(dim(X_test))
+
+print("Label distribution (training set):")
+print(table(y_train))
+
+print("Label distribution (testing set):")
+print(table(y_test))
+
+print("Distribution of target variable in training set:")
+print(prop.table(table(y_train)))  
+
+print("Distribution of target variable in testing set:")
+print(prop.table(table(y_test)))  
+
+print("Distribution of target variable in original data set:")
+print(prop.table(table(y)))
+```
+## 1.5 Define useful function
+
+### 1.5.1. Function for drawing the confusion matrix
+```{r}
+plot_confusion_heatmap <- function(conf_matrix, title) {
+  cm <- as.table(conf_matrix$table)
+  
+  cm_df <- as.data.frame(cm)
+  colnames(cm_df) <- c("Prediction", "Reference", "Freq")
+
+  ggplot(cm_df, aes(x = Prediction, y = Reference, fill = Freq)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = Freq), size = 6, color = "black") +
+    scale_fill_gradient(low = "lightblue", high = "darkblue") +
+    labs(title = title, x = "Predicted", y = "Actual") +
+    theme_minimal(base_size = 14)
+}
+```
+
+### 1.5.2. Function for drawing cross-validation accuracy distribution
+```{r}
+plot_cv_accuracy <- function(cv_results, title) {
+  if (length(cv_results) == 0) {
+    stop("The cv_results is empty. Please provide a valid cross-validation result.")
+  }
+
+  cv_data <- data.frame(Fold = 1:length(cv_results), Accuracy = cv_results)
+
+  ggplot(cv_data, aes(x = Fold, y = Accuracy)) +
+    geom_line(color = "blue") +
+    geom_point(size = 2, color = "red") +
+    ggtitle(title) +
+    xlab("Fold") +
+    ylab("Accuracy") +
+    theme_minimal()
+}
+
+```
+
+
+### 1.5.3. Visualizing variable contributions
+```{r}
+
+plot_logistic_coefficients <- function(model, title) {
+  if (is.null(coef(model$finalModel))) {
+    stop("The model does not contain coefficients. Please provide a valid logistic regression model.")
+  }
+  coefficients <- coef(model$finalModel)
+  coeff_df <- data.frame(Variable = names(coefficients), 
+                         Coefficient = as.numeric(coefficients))
+  coeff_df <- coeff_df[coeff_df$Variable != "(Intercept)", ]
+  coeff_df <- coeff_df[order(abs(coeff_df$Coefficient), decreasing = TRUE), ]
+  ggplot(coeff_df, aes(x = reorder(Variable, Coefficient), y = Coefficient, fill = Coefficient > 0)) +
+    geom_bar(stat = "identity") +
+    coord_flip() + 
+    scale_fill_manual(values = c("TRUE" = "skyblue", "FALSE" = "tomato")) +
+    labs(title = title,
+         x = "Variables",
+         y = "Coefficient Value",
+         fill = "Impact") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5)) 
+}
+```
+
+
+# 2. Logistic regression model
+
+## 2.1. Original Logistic regression
+```{r}
+y_train <- as.factor(y_train)
+y_test <- as.factor(y_test)
+
+# 1. train model
+set.seed(123)  
+model_lr <- train(x = X_train, y = y_train, 
+                  method = "glm", family = "binomial", 
+                  trControl = trainControl(method = "cv", number = 10))  
+# 2. model results
+print("Training Results:")
+print(model_lr)
+
+# 3. cross validation accuracy
+lr_cv_results <- model_lr$resample$Accuracy
+plot_cv_accuracy(lr_cv_results,"Logistic Regression Cross-Validation Accuracy")
+
+# 4. model predicting
+y_pred_prob <- predict(model_lr, X_test, type = "prob")[,2]  # 预测概率
+y_pred <- ifelse(y_pred_prob > 0.5, 1, 0)  # 概率阈值0.5
+
+# 5. evaluate performance
+conf_lr <- confusionMatrix(as.factor(y_pred), as.factor(y_test))
+print("Logistic Regression Confusion Matrix:")
+print(conf_lr)
+
+# 6. Plot confusion_heatmap
+heatmap_lr <- plot_confusion_heatmap(conf_lr, "Logistic Regression Confusion Matrix")
+heatmap_lr
+
+# 7. Compute AUC-ROC
+roc_curve <- roc(y_test, y_pred_prob)
+print(paste("AUC value:", auc(roc_curve)))
+plot(roc_curve, col = "blue", main = "ROC Curve - Logistic Regression")
+
+# 8. Variable contribution
+print("View regression coefficients and statistical significance")
+print(summary(model_lr))  
+
+coefficients <- coef(model_lr$finalModel)
+print(coefficients)
+plot_logistic_coefficients(model_lr, "Variable Coefficients in Normal Logistic Regression")
+
+```
+
+## 2.2. Ridge Logistic regression
+```{r pressure, echo=FALSE}
+set.seed(123)
+model_ridge <- train(x = X_train, y = as.factor(y_train), 
+                     method = "glmnet", family = "binomial", 
+                     trControl = trainControl(method = "cv", number = 10),
+                     tuneGrid = expand.grid(alpha = 0, lambda = seq(0.001, 0.1, by = 0.01)))  
+
+print("Ridge Logistic Regresion Model Results:")
+print(model_ridge)
+
+ridge_cv_results <- model_ridge$resample$Accuracy 
+plot_cv_accuracy(ridge_cv_results,"Ridge Logistic Regression Cross-Validation Accuracy")
+
+y_pred_prob_ridge <- predict(model_ridge, X_test, type = "prob")[,2]
+y_pred_ridge <- ifelse(y_pred_prob_ridge > 0.5, 1, 0)
+
+conf_ridge <- confusionMatrix(as.factor(y_pred_ridge), as.factor(y_test))
+print("Ridge Logistic Regression Confusion Matrix:")
+print(conf_ridge)
+plot_confusion_heatmap(conf_ridge, "Ridge Logistic Regression Confusion Matrix")
+
+roc_curve_ridge <- roc(y_test, y_pred_prob_ridge)
+print(paste("AUC value (Ridge):", auc(roc_curve_ridge)))
+plot(roc_curve_ridge, col = "blue", main = "ROC Curve - Ridge Logistic Regression")
+
+print("View regression coefficients and statistical significance")
+print(summary(model_ridge))
+
+
+best_lambda <- model_ridge$bestTune$lambda
+coefficients <- coef(model_ridge$finalModel, s = best_lambda)
+print(coefficients)
+
+coeff_df <- as.data.frame(as.matrix(coefficients))
+coeff_df$Variable <- rownames(coeff_df)
+colnames(coeff_df)[1] <- "Coefficient"
+coeff_df <- coeff_df[coeff_df$Variable != "(Intercept)", ]
+coeff_df <- coeff_df[order(abs(coeff_df$Coefficient), decreasing = TRUE), ]
+print(coeff_df)
+
+ggplot(coeff_df, aes(x = reorder(Variable, Coefficient), y = Coefficient, fill = Coefficient > 0)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(values = c("TRUE" = "skyblue", "FALSE" = "tomato")) +
+  labs(title = "Variable Coefficients in Ridge Logistic Regression",
+       x = "Variables", y = "Coefficient Value", fill = "Impact") +
+  theme_minimal()
+```
+
+## 2.3. Lasso Logistic regression
+```{r}
+set.seed(123)
+model_lasso <- train(x = X_train, y = as.factor(y_train), 
+                     method = "glmnet", family = "binomial", 
+                     trControl = trainControl(method = "cv", number = 10),
+                     tuneGrid = expand.grid(alpha = 1, lambda = seq(0.001, 0.1, by = 0.01)))
+
+print("Lasso Logistic Regresion Model Results:")
+print(model_lasso)
+
+lasso_cv_results <- model_lasso$resample$Accuracy 
+plot_cv_accuracy(lasso_cv_results,"Lasso Logistic Regression Cross-Validation Accuracy")
+
+y_pred_prob_lasso <- predict(model_lasso, X_test, type = "prob")[,2]
+y_pred_lasso <- ifelse(y_pred_prob_lasso > 0.5, 1, 0)
+
+conf_lasso <- confusionMatrix(as.factor(y_pred_lasso), as.factor(y_test))
+print("Lasso Logistic Regression Confusion Matrix:")
+print(conf_lasso)
+plot_confusion_heatmap(conf_lasso, "Lasso Logistic Regression Confusion Matrix")
+
+roc_curve_lasso <- roc(y_test, y_pred_prob_lasso)
+print(paste("AUC value (lasso):", auc(roc_curve_lasso)))
+plot(roc_curve_lasso, col = "blue", main = "ROC Curve - Lasso Logistic Regression")
+
+print("View regression coefficients and statistical significance")
+print(summary(model_lasso))
+
+best_lambda <- model_lasso$bestTune$lambda
+coefficients <- coef(model_lasso$finalModel, s = best_lambda)
+print(coefficients)
+
+coeff_df <- as.data.frame(as.matrix(coefficients))
+coeff_df$Variable <- rownames(coeff_df)
+colnames(coeff_df)[1] <- "Coefficient"
+coeff_df <- coeff_df[coeff_df$Variable != "(Intercept)", ]
+coeff_df <- coeff_df[order(abs(coeff_df$Coefficient), decreasing = TRUE), ]
+print(coeff_df)
+
+ggplot(coeff_df, aes(x = reorder(Variable, Coefficient), y = Coefficient, fill = Coefficient > 0)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(values = c("TRUE" = "skyblue", "FALSE" = "tomato")) +
+  labs(title = "Variable Coefficients in Lasso Logistic Regression",
+       x = "Variables", y = "Coefficient Value", fill = "Impact") +
+  theme_minimal()
+```
+
+# 3. KNN model
+
+## 3.1. Original KNN model
+```{r}
+set.seed(123)
+tuneGrid <- expand.grid(k = seq(1, 15, by = 1))
+
+model_knn <- train(x = X_train, y = as.factor(y_train),
+                   method = "knn",
+                   tuneGrid = tuneGrid, 
+                   trControl = trainControl(method = "cv", number = 10),)
+
+print("KNN model results:")
+print(model_knn)
+
+knn_cv_results <- model_knn$resample$Accuracy
+plot_cv_accuracy(knn_cv_results,"KNN Cross-Validation Accuracy")
+
+y_pred_knn <- predict(model_knn, X_test)
+
+conf_knn <- confusionMatrix(y_pred_knn, as.factor(y_test))
+print("KNN Confusion Matrix:")
+print(conf_knn)
+plot_confusion_heatmap(conf_knn, "KNN Confusion Matrix")
+
+y_pred_knn_prob <- as.numeric(as.character(predict(model_knn, X_test, type = "prob")[,2]))
+roc_curve_knn <- roc(y_test, y_pred_knn_prob)
+print(paste("AUC Value (KNN):", auc(roc_curve_knn)))
+plot(roc_curve_knn, col = "blue", main = "ROC Curve - KNN")
+
+```
+
+## 3.2. Kernel KNN model
+```{r}
+set.seed(123)
+tuneGrid <- expand.grid(kmax = seq(1, 15, by = 1), distance = c(1, 2), kernel = c("rectangular", "triangular"))
+
+model_kknn <- train(x = X_train, y = as.factor(y_train),
+                   method = "kknn",
+                   tuneGrid = tuneGrid,
+                   trControl = trainControl(method = "cv", number = 10))
+
+print("Kernel kNN model results:")
+print(model_kknn)
+kknn_cv_results <- model_kknn$resample$Accuracy
+plot_cv_accuracy(kknn_cv_results,"Kernel KNN Cross-Validation Accuracy")
+
+y_pred_kknn <- predict(model_kknn, X_test)
+
+conf_kknn <- confusionMatrix(y_pred_kknn, as.factor(y_test))
+print("Kernel KNN Confusion Matrix:")
+print(conf_kknn)
+plot_confusion_heatmap(conf_kknn, "Kernel KNN Confusion Matrix")
+
+y_pred_kknn_prob <- as.numeric(as.character(predict(model_kknn, X_test, type = "prob")[,2]))
+roc_curve_kknn <- roc(y_test, y_pred_kknn_prob)
+print(paste("AUC Value (KKNN):", auc(roc_curve_knn)))
+plot(roc_curve_kknn, col = "blue", main = "ROC Curve - KKNN")
+
+```
+
+## 3.3. KNN PCA model
+```{r}
+
+preprocess_params <- preProcess(X_train, method = c("center", "scale"))
+X_train_scaled <- predict(preprocess_params, X_train)
+X_test_scaled <- predict(preprocess_params, X_test)
+
+set.seed(123)
+pca_model <- preProcess(X_train_scaled, method = "pca", pcaComp = 4)
+X_train_pca <- predict(pca_model, X_train_scaled)
+X_test_pca <- predict(pca_model, X_test_scaled)
+
+set.seed(123)
+knn_pca_model <- train(x = X_train_pca, y = as.factor(y_train),
+                 method = "knn",
+                 tuneGrid = expand.grid(k = seq(1, 15, by = 1)), 
+                 trControl = trainControl(method = "cv", number = 10))
+
+print("knn_pca_model model results:")
+print(knn_pca_model)
+
+knn_pca_cv_results <- knn_pca_model$resample$Accuracy
+plot_cv_accuracy(knn_pca_cv_results,"KNN PCA Cross-Validation Accuracy")
+
+y_pred_knn_pca <- predict(knn_pca_model, X_test_pca)
+y_pred_prob_knn_pca <- as.numeric(as.character(predict(knn_pca_model, X_test_pca, type = "prob")[,2]))
+
+knn_pca_conf_matrix <- confusionMatrix(y_pred_knn_pca, as.factor(y_test))
+print("KNN PCA ConfusionMatrix:")
+print(knn_pca_conf_matrix)
+
+roc_curve_knn_pca <- roc(y_test, y_pred_prob_knn_pca)
+print(paste("AUC Value (KNN_PCA):", auc(roc_curve_knn_pca)))
+plot(roc_curve_knn_pca, col = "blue", main = "ROC Curve - PCA KNN")
+plot_confusion_heatmap(conf_matrix_knn_pca, "KNN PCA Confusion Matrix")
+```
+
+
+```{r pressure, echo=FALSE}
+library(randomForest)
+
+set.seed(123)
+rf_model_caret <- train(x = X_train, y = as.factor(y_train),
+                        method = "rf",  
+                        trControl = trainControl(method = "cv", number = 10), 
+                        importance = TRUE, ntree = 500)
+
+print("Random Forest model results:")
+print(rf_model_caret)
+
+rf_cv_results <- rf_model_caret$resample$Accuracy
+plot_cv_accuracy(rf_cv_results,"Random Forest Cross-Validation Accuracy")
+
+rf_varimp <- varImp(rf_model_caret)
+plot(rf_varimp, main = "Variable Importance - Random Forest")
+
+y_pred_rf <- predict(rf_model_caret, X_test)
+
+conf_rf <- confusionMatrix(y_pred_rf, as.factor(y_test))
+print("Random Forest Confusion Matrix:")
+print(conf_rf)
+plot_confusion_heatmap(conf_rf, "Random Forest Confusion Matrix")
+
+y_pred_rf_prob <- predict(rf_model_caret, X_test, type = "prob")[, 2]
+roc_curve_rf <- roc(y_test, y_pred_rf_prob)
+print(paste("AUC Value (Random Forest):", auc(roc_curve_rf)))
+plot(roc_curve_rf, col = "blue", main = "ROC Curve - Random Forest")
+
+
+```
+
+```{r}
+set.seed(123)
+control <- rfeControl(functions = rfFuncs, method = "cv", number = 10)
+rfe_result <- rfe(x = X_train, y = y_train, sizes = c(1:10), rfeControl = control)
+
+print(rfe_result)
+plot(rfe_result, main = "RFE Feature Selection")
+
+
+```
+
+
+```{r}
+```
+
+```{r}
+```
+
+```{r}
+```

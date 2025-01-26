@@ -1,0 +1,130 @@
+---
+title: "Untitled"
+author: "Jieyuhan Zhu"
+date: "2024-12-19"
+output:pdf_document
+---
+
+```{r}
+library(caret)
+library(DMwR2)      
+library(e1071)    
+library(pROC)      
+library(dplyr)    
+library(foreign)  
+library(ggplot2) 
+library(reshape2) 
+
+data_adult <- read.arff("C:\\Users\\zjyh\\Desktop\\6690 project\\Autism-Adolescent-Data.arff")
+
+fill_na_with_mode <- function(column) {
+  mode_value <- names(sort(table(column), decreasing = TRUE))[1]
+  column[is.na(column)] <- mode_value
+  return(column)
+}
+fill_na_with_mean <- function(column) {
+  mean_value <- mean(column, na.rm = TRUE)
+  column[is.na(column)] <- mean_value
+  return(column)
+}
+
+data_adult$ethnicity <- fill_na_with_mode(data_adult$ethnicity)
+data_adult$relation <- fill_na_with_mode(data_adult$relation)
+data_adult$age <- fill_na_with_mean(data_adult$age)
+colnames(data_adult) <- make.names(colnames(data_adult))
+data_adult$Class.ASD <- as.factor(data_adult$Class.ASD)
+
+set.seed(123)
+train_index_adult <- createDataPartition(data_adult$Class.ASD, p = 0.8, list = FALSE)
+train_data_adult <- data_adult[train_index_adult, ]
+test_data_adult <- data_adult[-train_index_adult, ]
+
+test_data_adult$ethnicity <- factor(test_data_adult$ethnicity, levels = levels(train_data_adult$ethnicity))
+test_data_adult$relation <- factor(test_data_adult$relation, levels = levels(train_data_adult$relation))
+
+factor_cols <- sapply(train_data_adult, is.factor)
+level_counts <- sapply(train_data_adult[, factor_cols], function(col) length(unique(col)))
+cols_to_remove <- names(level_counts[level_counts <= 1])
+if (length(cols_to_remove) > 0) {
+  train_data_adult <- train_data_adult[, !(names(train_data_adult) %in% cols_to_remove)]
+  test_data_adult <- test_data_adult[, !(names(test_data_adult) %in% cols_to_remove)]
+}
+
+plot_confusion_heatmap <- function(conf_matrix, title) {
+  cm <- as.table(conf_matrix$table)
+  cm_df <- as.data.frame(cm)
+  colnames(cm_df) <- c("Reference", "Prediction", "Count")
+  
+  ggplot(cm_df, aes(x = Reference, y = Prediction, fill = Count)) +
+    geom_tile(color = "white") +
+    scale_fill_gradient(low = "skyblue", high = "tomato") +
+    geom_text(aes(label = Count), vjust = 1) +
+    labs(title = title, x = "Reference", y = "Prediction", fill = "Count") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+
+plot_cv_accuracy <- function(results, title) {
+  ggplot(data.frame(Fold = 1:length(results), Accuracy = results), aes(x = Fold, y = Accuracy)) +
+    geom_point(size = 3, color = "blue") +
+    geom_line(color = "blue") +
+    labs(title = title, x = "Fold Number", y = "Accuracy") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 5, classProbs = TRUE, savePredictions = TRUE)
+tune_grid_svm <- expand.grid(
+  sigma = 2^(-5:5),
+  C = 2^(-5:5)     
+)
+
+
+svm_cv_model_adult <- train(
+  Class.ASD ~ ., 
+  data = train_data_adult, 
+  method = "svmRadial",
+  trControl = train_control,
+  tuneGrid = tune_grid_svm
+)
+
+test_predictions_adult_svm <- predict(svm_cv_model_adult, test_data_adult)
+conf_matrix_svm <- confusionMatrix(data = test_predictions_adult_svm, reference = test_data_adult$Class.ASD)
+
+plot_cv_accuracy(svm_cv_model_adult$resample$Accuracy, "SVM Cross-Validation Accuracy")
+
+plot_confusion_heatmap(conf_matrix_svm, "SVM Confusion Matrix")
+
+tune_grid_nb <- expand.grid(laplace = seq(0, 2, by = 0.5), usekernel = c(TRUE, FALSE), adjust = seq(0.5, 2, by = 0.5))
+
+nb_cv_model_adult <- train(
+  Class.ASD ~ ., 
+  data = train_data_adult, 
+  method = "naive_bayes",
+  trControl = train_control,
+  tuneGrid = tune_grid_nb
+)
+
+test_predictions_nb_adult <- predict(nb_cv_model_adult, test_data_adult)
+conf_matrix_nb <- confusionMatrix(data = test_predictions_nb_adult, reference = test_data_adult$Class.ASD)
+
+
+plot_confusion_heatmap(conf_matrix_nb, "Naive Bayes Confusion Matrix")
+
+
+svm_probs <- predict(svm_cv_model_adult, test_data_adult, type = "prob")[, 2]
+nb_probs <- predict(nb_cv_model_adult, test_data_adult, type = "prob")[, 2]
+
+svm_roc <- roc(test_data_adult$Class.ASD, svm_probs)
+nb_roc <- roc(test_data_adult$Class.ASD, nb_probs)
+
+plot(svm_roc, main = "SVM ROC Curve", col = "blue", lwd = 2)
+plot(nb_roc, add = TRUE, col = "red", lwd = 2)
+legend("bottomright", legend = c("SVM", "Naive Bayes"), col = c("blue", "red"), lwd = 2)
+
+print(conf_matrix_svm)
+print(conf_matrix_nb)
+print(paste("SVM AUC:", round(auc(svm_roc), 4)))
+print(paste("Naive Bayes AUC:", round(auc(nb_roc), 4)))
+```

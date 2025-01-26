@@ -1,0 +1,457 @@
+---
+title: "Untitled"
+author: "Jieyuhan Zhu"
+date: "2024-12-19"
+output: pdf_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(pROC)
+library(corrplot)
+library(class)
+```
+
+# Autism-Adult-Data Analysis
+
+# 1. Data Preparation
+
+## 1.1. Data Overview
+```{r}
+# load data
+dataset <- read.arff("C:\\Users\\zjyh\\Desktop\\6690 project\\Autism-Adult-Data.arff")
+```
+
+
+```{r}
+# data structure
+print(str(dataset))    
+```
+
+```{r}
+# column rename
+colnames(dataset) <- c("A1_Score", "A2_Score", "A3_Score", "A4_Score", "A5_Score",
+                       "A6_Score", "A7_Score", "A8_Score", "A9_Score", "A10_Score",
+                       "Age", "Gender", "Ethnicity", "Jaundice", "Family_ASD",
+                       "Country", "Used_App_Before", "Result", "Age_Desc", "Relation", "Class_ASD")
+
+```
+
+```{r}
+# Summary Statistics
+print(summary(dataset)) 
+# Null value test
+print(colSums(is.na(dataset)))
+```
+## 1.2. Data Exploratory analysis
+
+### 1.2.1. Age Exploratory analysis
+```{r}
+
+dataset <- dataset %>% filter(Age <= 100)
+
+boxplot(dataset$Age, main = "Boxplot of Age", col = "lightblue")
+
+ggplot(dataset, aes(x = Age, fill = Class_ASD)) +
+  geom_histogram(position = "dodge", bins = 20, alpha = 0.7) +
+  ggtitle("Age Distribution by Class_ASD") +
+  xlab("Age") +
+  ylab("Count") +
+  theme_minimal()
+
+
+ggplot(dataset, aes(x = Age, fill = Class_ASD)) +
+  geom_density(alpha = 0.5) +
+  ggtitle("Age Density by Class_ASD") +
+  xlab("Age") +
+  ylab("Density") +
+  theme_minimal()
+
+
+ggplot(dataset, aes(x = Class_ASD, y = Age, fill = Class_ASD)) +
+  geom_boxplot() +
+  ggtitle("Age vs Class_ASD")
+
+
+```
+
+### 1.2.2. Redundant term verification
+```{r}
+lm_model <- lm(Result ~ A1_Score + A2_Score + A3_Score + A4_Score + A5_Score + 
+               A6_Score + A7_Score + A8_Score + A9_Score + A10_Score, data = dataset)
+
+summary(lm_model)
+
+```
+
+### 1.2.3. Relationship analysis between categorical variables and target variables
+```{r}
+
+# Jundice & Class_ASD
+ggplot(dataset, aes(x = Jaundice, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Jundice Distribution by Class_ASD") +
+  ylab("Proportion") + xlab("Jundice")
+
+# Family_ASD & Class_ASD
+ggplot(dataset, aes(x = Family_ASD, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Family_ASD Distribution by Class_ASD") +
+  ylab("Proportion") + xlab("Autism")
+
+# Used_App_Before & Class_ASD
+ggplot(dataset, aes(x = Used_App_Before, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Used_App_Before Distribution by Used_App_Before") +
+  ylab("Proportion") + xlab("Autism")
+```
+
+### 1.2.4. Relationship between Ethnicity distribution and target variable
+```{r}
+# Ethnicity distribution statistics
+Ethnicity_count <- dataset %>%
+  group_by(Ethnicity) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count))
+
+# Visualize All Ethnicity by Observation Count
+ggplot(Ethnicity_count, aes(x = reorder(Ethnicity, -Count), y = Count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  ggtitle("All Ethnicity by Observation Count") +
+  xlab("Country") + ylab("Count") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Visualize Autism Distribution by Ethnicity
+ggplot(dataset, aes(x = Ethnicity, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Autism Distribution by Ethnicity") +
+  ylab("Proportion") + xlab("Autism")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Visualize target variable proportion in the Ethnicity distribution
+ethnicity_summary <- dataset %>%
+  group_by(Ethnicity, Class_ASD) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(Ethnicity) %>%
+  mutate(Proportion = Count / sum(Count) * 100) %>%  
+  ungroup()
+
+ethnicity_order <- ethnicity_summary %>%
+  group_by(Ethnicity) %>%
+  summarise(Total_Count = sum(Count)) %>%
+  arrange(desc(Total_Count))
+
+ggplot(ethnicity_summary, 
+       aes(x = factor(Ethnicity, levels = ethnicity_order$Ethnicity), 
+           y = Count, fill = Class_ASD)) +
+  geom_bar(stat = "identity", position = "stack", alpha = 0.8) +  
+  geom_text(data = ethnicity_summary %>% filter(Class_ASD == "YES"), 
+            aes(label = sprintf("%.2f%%", Proportion)), 
+            position = position_stack(vjust = 0.5), size = 3, color = "black") +
+  ggtitle("Ethnicity Count with Class_ASD Proportion") +
+  xlab("Ethnicity") + 
+  ylab("Count") +
+  scale_fill_manual(values = c("NO" = "salmon", "YES" = "skyblue")) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+### 1.2.5. Relationship between Country distribution and target variable
+```{r}
+# Country distribution statistics
+country_count <- dataset %>%
+  group_by(Country) %>%
+  summarise(Count = n()) %>%
+  arrange(desc(Count))
+
+
+# Visualize All Countries by Observation Count
+ggplot(country_count, aes(x = reorder(Country, -Count), y = Count)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  ggtitle("All Countries by Observation Count") +
+  xlab("Country") + ylab("Count") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Visualize Autism Distribution by Ethnicity
+ggplot(dataset, aes(x = Country, fill = Class_ASD)) +
+  geom_bar(position = "fill") +
+  ggtitle("Autism Distribution by Ethnicity") +
+  ylab("Proportion") + xlab("Autism") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+# Visualize Country Count with Class_ASD Proportion
+Country_summary <- dataset %>%
+  group_by(Country, Class_ASD) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(Country) %>%
+  mutate(Proportion = Count / sum(Count) * 100) %>%
+  ungroup()
+
+Country_order <- Country_summary %>%
+  group_by(Country) %>%
+  summarise(Total_Count = sum(Count)) %>%
+  arrange(desc(Total_Count))
+
+ggplot(Country_summary, 
+       aes(x = factor(Country, levels = Country_order$Country), 
+           y = Count, fill = Class_ASD)) +
+  geom_bar(stat = "identity", position = "stack", alpha = 1) + 
+  ggtitle("Country Count with Class_ASD Proportion") +
+  xlab("Country") + 
+  ylab("Count") +
+  scale_fill_manual(values = c("NO" = "salmon", "YES" = "skyblue")) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+### 1.2.6. Relationship between factor and target variable
+```{r}
+data = dataset
+data$A1_Score <- as.numeric(as.character(dataset$A1_Score))
+data$A2_Score <- as.numeric(as.character(dataset$A2_Score))
+data$A3_Score <- as.numeric(as.character(dataset$A3_Score))
+data$A4_Score <- as.numeric(as.character(dataset$A4_Score))
+data$A5_Score <- as.numeric(as.character(dataset$A5_Score))
+data$A6_Score <- as.numeric(as.character(dataset$A6_Score))
+data$A7_Score <- as.numeric(as.character(dataset$A7_Score))
+data$A8_Score <- as.numeric(as.character(dataset$A8_Score))
+data$A9_Score <- as.numeric(as.character(dataset$A9_Score))
+data$A10_Score <- as.numeric(as.character(dataset$A10_Score))
+data$Class_ASD <- ifelse(dataset$Class_ASD == "YES", 1,
+                         ifelse(dataset$Class_ASD == "NO", 0, NA))
+
+score_data <- data[, c("A1_Score", "A2_Score", "A3_Score", "A4_Score", 
+                       "A5_Score", "A6_Score", "A7_Score", "A8_Score", 
+                       "A9_Score", "A10_Score","Class_ASD")]
+
+cor_matrix <- cor(score_data)
+
+corrplot(cor_matrix, method = "color", type = "full", 
+         tl.col = "black", tl.srt = 45, 
+         addCoef.col = "black", number.cex = 0.7, 
+         title = "Heatmap of Score Correlations")
+
+str(data)
+```
+
+### 1.2.7. Check for collinearity
+```{r}
+library(car)
+cor_data <- data[, c("A1_Score", "A2_Score", "A3_Score", "A4_Score", "A5_Score", 
+                     "A6_Score", "A7_Score", "A8_Score", "A9_Score", "A10_Score", 
+                     "Age", "Gender", "Jaundice", "Family_ASD", "Used_App_Before","Class_ASD")]
+
+model <- lm(Class_ASD ~ ., data = cor_data)
+
+vif_values <- vif(model)
+print(vif_values)
+
+```
+
+## 1.3. Data preprocessing
+
+### 1.3.1. Process Binary Columns
+```{r}
+# Determine the binary columns that need to be processed
+binary_columns <- c("Jaundice", "Family_ASD", "Used_App_Before", "Class_ASD")
+
+# Unify the values of all binary columns into lowercase and convert them to 0/1
+dataset[binary_columns] <- lapply(dataset[binary_columns], function(x) {
+  x <- tolower(as.character(x))       
+  x <- ifelse(x == "yes", 1, ifelse(x == "no", 0, NA))  
+  as.numeric(x)                 
+})
+```
+### 1.3.2. Process Null Value Columns
+```{r}
+# Process the gender column: convert "m" and "f" to numeric values
+dataset$Gender <- ifelse(dataset$Gender == "m", 1, ifelse(dataset$Gender == "f", 0, NA))
+
+# Use median to fill numeric variables Age 
+# data <- na.omit(data) # remove Na Data
+dataset$Age[is.na(dataset$Age)] <- median(dataset$Age, na.rm = TRUE)
+
+# Use mode to fill ategorical variables Ethnicity Relation
+fill_mode <- function(x) {
+  ux <- unique(x[!is.na(x)])
+  ux[which.max(tabulate(match(x, ux)))]
+}
+dataset$Ethnicity[is.na(dataset$Ethnicity)] <- fill_mode(dataset$Ethnicity)
+dataset$Relation[is.na(dataset$Relation)] <- fill_mode(dataset$Relation)
+
+str(dataset)
+```
+
+## 1.4. Data Preparation
+
+### 1.4.1. Extract Feature & Target
+```{r}
+features <- c("A1_Score", "A2_Score", "A3_Score", "A4_Score", "A5_Score",
+              "A6_Score", "A7_Score", "A8_Score", "A9_Score", "A10_Score",
+              "Age", "Gender", "Jaundice", "Family_ASD", "Used_App_Before")
+
+X <- dataset[, features]
+y <- dataset$Class_ASD
+```
+
+### 1.4.2. Dataset Partitioning
+```{r}
+
+set.seed(123) 
+train_index <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[train_index, ]
+X_test <- X[-train_index, ]
+y_train <- y[train_index]
+y_test <- y[-train_index]
+
+print("Training set dimensions:")
+print(dim(X_train))
+
+print("Testing set dimensions")
+print(dim(X_test))
+
+print("Label distribution (training set):")
+print(table(y_train))
+
+print("Label distribution (testing set):")
+print(table(y_test))
+
+print("Distribution of target variable in training set:")
+print(prop.table(table(y_train)))  
+
+print("Distribution of target variable in testing set:")
+print(prop.table(table(y_test)))  
+
+print("Distribution of target variable in original data set:")
+print(prop.table(table(y)))
+```
+## 1.5 Define useful function
+
+### 1.5.1. Function for drawing the confusion matrix
+```{r}
+plot_confusion_heatmap <- function(conf_matrix, title) {
+  cm <- as.table(conf_matrix$table)
+  
+  cm_df <- as.data.frame(cm)
+  colnames(cm_df) <- c("Prediction", "Reference", "Freq")
+
+  ggplot(cm_df, aes(x = Prediction, y = Reference, fill = Freq)) +
+    geom_tile(color = "white") +
+    geom_text(aes(label = Freq), size = 6, color = "black") +
+    scale_fill_gradient(low = "lightblue", high = "darkblue") +
+    labs(title = title, x = "Predicted", y = "Actual") +
+    theme_minimal(base_size = 14)
+}
+```
+
+### 1.5.2. Function for drawing cross-validation accuracy distribution
+```{r}
+plot_cv_accuracy <- function(cv_results, title) {
+  if (length(cv_results) == 0) {
+    stop("The cv_results is empty. Please provide a valid cross-validation result.")
+  }
+
+  cv_data <- data.frame(Fold = 1:length(cv_results), Accuracy = cv_results)
+
+  ggplot(cv_data, aes(x = Fold, y = Accuracy)) +
+    geom_line(color = "blue") +
+    geom_point(size = 2, color = "red") +
+    ggtitle(title) +
+    xlab("Fold") +
+    ylab("Accuracy") +
+    theme_minimal()
+}
+
+```
+
+
+### 1.5.3. Visualizing variable contributions
+```{r}
+
+plot_logistic_coefficients <- function(model, title) {
+  if (is.null(coef(model$finalModel))) {
+    stop("The model does not contain coefficients. Please provide a valid logistic regression model.")
+  }
+  coefficients <- coef(model$finalModel)
+  coeff_df <- data.frame(Variable = names(coefficients), 
+                         Coefficient = as.numeric(coefficients))
+  coeff_df <- coeff_df[coeff_df$Variable != "(Intercept)", ]
+  coeff_df <- coeff_df[order(abs(coeff_df$Coefficient), decreasing = TRUE), ]
+  ggplot(coeff_df, aes(x = reorder(Variable, Coefficient), y = Coefficient, fill = Coefficient > 0)) +
+    geom_bar(stat = "identity") +
+    coord_flip() + 
+    scale_fill_manual(values = c("TRUE" = "skyblue", "FALSE" = "tomato")) +
+    labs(title = title,
+         x = "Variables",
+         y = "Coefficient Value",
+         fill = "Impact") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5)) 
+}
+```
+
+
+# 2. Random Forest Model
+
+```{r}
+y_train <- as.factor(y_train)
+y_test <- as.factor(y_test)
+
+# 1. train model
+set.seed(123)  
+model_lr <- train(x = X_train, y = y_train, 
+                  method = "rf", 
+                  trControl = trainControl(method = "cv", number = 10))  
+# 2. model results
+print("Training Results:")
+print(model_lr)
+
+# 3. cross validation accuracy
+lr_cv_results <- model_lr$resample$Accuracy
+plot_cv_accuracy(lr_cv_results,"Logistic Regression Cross-Validation Accuracy")
+
+# 4. model predicting
+y_pred_prob <- predict(model_lr, X_test, type = "prob")[,2]  
+y_pred <- ifelse(y_pred_prob > 0.5, 1, 0)  
+
+# 5. evaluate performance
+conf_lr <- confusionMatrix(as.factor(y_pred), as.factor(y_test))
+print("Logistic Regression Confusion Matrix:")
+print(conf_lr)
+
+# 6. Plot confusion_heatmap
+heatmap_lr <- plot_confusion_heatmap(conf_lr, "Logistic Regression Confusion Matrix")
+heatmap_lr
+
+```
+
+# 3. Naive Bayes Model
+```{r pressure, echo=FALSE}
+y_train <- as.factor(y_train)
+y_test <- as.factor(y_test)
+
+# 1. train model
+set.seed(123)  
+model_lr <- train(x = X_train, y = y_train, 
+                  method = "naive_bayes", 
+                  trControl = trainControl(method = "cv", number = 10))  
+# 2. model results
+print("Training Results:")
+print(model_lr)
+
+# 3. cross validation accuracy
+lr_cv_results <- model_lr$resample$Accuracy
+plot_cv_accuracy(lr_cv_results,"Logistic Regression Cross-Validation Accuracy")
+
+# 4. model predicting
+y_pred_prob <- predict(model_lr, X_test, type = "prob")[,2]  
+y_pred <- ifelse(y_pred_prob > 0.5, 1, 0)  
+
+# 5. evaluate performance
+conf_lr <- confusionMatrix(as.factor(y_pred), as.factor(y_test))
+print("Logistic Regression Confusion Matrix:")
+print(conf_lr)
+
+# 6. Plot confusion_heatmap
+heatmap_lr <- plot_confusion_heatmap(conf_lr, "Logistic Regression Confusion Matrix")
+heatmap_lr
+```
