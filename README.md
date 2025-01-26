@@ -1,0 +1,1 @@
+This project compared 4 ML models, including SVM, Random Forest, and Naive Bayes, on an ASD dataset to predict ASD, with CNN achieving 99% accuracy, demonstrating potential for large-scale early screening and reduced manual diagnosis.
